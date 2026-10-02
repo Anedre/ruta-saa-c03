@@ -1,0 +1,21 @@
+# dependencias y compilados
+node_modules/
+dist/
+release/
+release-*/
+www/
+android/app/build/
+android/.gradle/
+*.apk
+*.aab
+
+# Amplify (se generan al desplegar)
+.amplify/
+amplify_outputs.json
+
+# configuración local del editor y de Claude
+.claude/
+.vscode/
+*.log
+.DS_Store
+Thumbs.db
