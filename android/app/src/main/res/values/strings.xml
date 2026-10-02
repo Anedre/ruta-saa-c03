@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Ruta SAA-C03</string>
+    <string name="title_activity_main">Ruta SAA-C03</string>
+    <string name="package_name">pe.andre.rutasaa</string>
+    <string name="custom_url_scheme">pe.andre.rutasaa</string>
+</resources>
