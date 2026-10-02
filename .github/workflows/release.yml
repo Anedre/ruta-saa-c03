@@ -61,7 +61,9 @@ jobs:
         with:
           distribution: temurin
           java-version: 21
-      - uses: android-actions/setup-android@v3
+      # La imagen ubuntu-latest ya trae el SDK de Android (ANDROID_HOME) con sus licencias aceptadas.
+      - name: SDK de Android disponible
+        run: echo "ANDROID_HOME=$ANDROID_HOME" && ls "$ANDROID_HOME/platforms" "$ANDROID_HOME/build-tools" | tail -6
       - run: npm ci
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
