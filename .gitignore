@@ -11,7 +11,6 @@ android/.gradle/
 
 # Amplify (se generan al desplegar)
 .amplify/
-amplify_outputs.json
 
 # configuración local del editor y de Claude
 .claude/

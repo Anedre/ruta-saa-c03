@@ -29,6 +29,7 @@
   --on-world:#FFFFFF;
   color-scheme:light;
 }
+:root{--sat:var(--safe-area-inset-top,env(safe-area-inset-top,0px));--sab:var(--safe-area-inset-bottom,env(safe-area-inset-bottom,0px))}
 *{box-sizing:border-box}
 html,body{height:100%}
 body{margin:0;color:var(--ink);font:16px/1.6 var(--body);overflow:hidden;
@@ -466,26 +467,26 @@ th{font:700 .72rem var(--display);text-transform:uppercase;letter-spacing:.06em;
 @media (max-width:760px){
   body{font-size:15px}
   h1{font-size:1.6rem} h2{font-size:1.3rem}
-  .topbar{flex-wrap:wrap;gap:10px;padding:10px 14px;padding-top:max(10px,env(safe-area-inset-top));backdrop-filter:none;background:var(--bg);z-index:8}
+  .topbar{flex-wrap:wrap;gap:10px;padding:10px 14px;padding-top:max(10px,var(--sat));backdrop-filter:none;background:var(--bg);z-index:8}
   .logo{font-size:1rem} .logo small{display:none} .logo .gem{width:26px;height:26px}
   .stats{margin-left:auto;gap:6px}
   .stat{padding:5px 9px;font-size:.82rem}
   .lvl .xp{display:none} .stat.lvl{padding-right:9px}
   .stats .iconbtn{display:none}
-  nav.tabs{position:fixed;left:0;right:0;bottom:0;z-index:7;justify-content:space-around;gap:0;padding:6px 4px calc(6px + env(safe-area-inset-bottom));background:color-mix(in srgb,var(--bg) 94%,transparent);backdrop-filter:blur(10px);border-top:1px solid var(--line)}
+  nav.tabs{position:fixed;left:0;right:0;bottom:0;z-index:7;justify-content:space-around;gap:0;padding:6px 4px calc(6px + var(--sab));background:color-mix(in srgb,var(--bg) 94%,transparent);backdrop-filter:blur(10px);border-top:1px solid var(--line)}
   nav.tabs button{flex-direction:column;gap:2px;padding:6px 4px;border-radius:12px;font-size:.62rem;flex:1;min-width:0}
   nav.tabs button span.lbl{display:block;overflow:hidden;text-overflow:ellipsis;max-width:100%}
   nav.tabs button svg.i{width:22px;height:22px}
   nav.tabs .badge{position:absolute;margin:-4px 0 0 18px;font-size:.6rem;padding:0 5px}
   nav.tabs button{position:relative}
-  .wrap{padding:16px 16px calc(96px + env(safe-area-inset-bottom))}
+  .wrap{padding:16px 16px calc(96px + var(--sab))}
   .view{gap:18px}
   .card{padding:16px}
   .modes,.g3,.kpis,.famlist,.badges{grid-template-columns:minmax(0,1fr)}
   .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
   .goal{grid-template-columns:auto 1fr}
   .row.between{gap:12px}
-  .toasts{top:max(10px,env(safe-area-inset-top));width:calc(100vw - 24px)}
+  .toasts{top:max(10px,var(--sat));width:calc(100vw - 24px)}
   .toast{max-width:none}
   /* ruta */
   .path{gap:28px}
@@ -495,7 +496,7 @@ th{font:700 .72rem var(--display);text-transform:uppercase;letter-spacing:.06em;
   .pop::before{left:calc(50% + var(--x) * .55)}
   .plabel{max-width:150px}
   /* juego */
-  .hud{padding:10px 14px;gap:10px;padding-top:max(10px,env(safe-area-inset-top))}
+  .hud{padding:10px 14px;gap:10px;padding-top:max(10px,var(--sat))}
   .combo{min-width:0}
   .arena{padding:18px 16px 220px}
   .arena.tall{padding-bottom:75vh}
@@ -503,7 +504,7 @@ th{font:700 .72rem var(--display);text-transform:uppercase;letter-spacing:.06em;
   .opt{padding:12px;gap:10px}
   .qactions{flex-wrap:wrap}
   .qactions>.row>.muted{display:none}
-  .sheet .in{grid-template-columns:minmax(0,1fr);gap:10px;padding:14px 16px calc(14px + env(safe-area-inset-bottom))}
+  .sheet .in{grid-template-columns:minmax(0,1fr);gap:10px;padding:14px 16px calc(14px + var(--sab))}
   .sheet .badgeic{display:none}
   .sheet .in>.btn{width:100%}
   .sheet .exp.big{max-height:46vh}
@@ -516,9 +517,9 @@ th{font:700 .72rem var(--display);text-transform:uppercase;letter-spacing:.06em;
   .day small,.day .tag{display:none}
   .day .dn{font-size:1.1rem}
   /* guion de inicio */
-  .onbtop{padding:12px 16px;padding-top:max(12px,env(safe-area-inset-top))}
+  .onbtop{padding:12px 16px;padding-top:max(12px,var(--sat))}
   .onbbody{padding:8px 16px 20px;align-items:start}
-  .onbfoot{padding:12px 16px calc(12px + env(safe-area-inset-bottom))}
+  .onbfoot{padding:12px 16px calc(12px + var(--sab))}
   .guide{grid-template-columns:minmax(0,1fr);gap:12px}
   .gem.xl{width:64px;height:64px;border-radius:20px}
   .gem.xl svg{width:36px;height:36px}
@@ -548,3 +549,6 @@ input[type=email],input[type=password]{background:var(--sunken);border:2px solid
 
 .dl{display:grid;gap:10px}
 .dl .btn{justify-content:flex-start}
+
+/* barras del sistema en Android e iPhone (en escritorio --sat vale 0) */
+@media (min-width:761px){ .topbar,.hud,.onbtop{padding-top:max(12px,var(--sat))} }
