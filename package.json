@@ -9,7 +9,11 @@
   "private": true,
   "scripts": {
     "start": "electron .",
+    "prestart": "node scripts/build-cloud.js",
     "test": "node scripts/test-engine.js && node scripts/test-glossary.js",
+    "build:cloud": "node scripts/build-cloud.js",
+    "build:web": "node scripts/build-cloud.js && node scripts/build-web.js",
+    "predist": "node scripts/build-cloud.js",
     "dist": "electron-builder --win nsis portable"
   },
   "build": {
@@ -41,8 +45,15 @@
     }
   },
   "devDependencies": {
+    "@aws-amplify/backend": "^1.25.1",
+    "@aws-amplify/backend-cli": "^1.10.0",
+    "aws-amplify": "^6.22.1",
+    "aws-cdk-lib": "^2.272.0",
+    "constructs": "^10.8.1",
     "electron": "^44.5.1",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
   },
   "dependencies": {
     "@fontsource-variable/nunito": "^5.3.0",

@@ -2,8 +2,17 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self' https://*.amazonaws.com https://api.github.com; worker-src 'self'; manifest-src 'self'">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#13142B">
+<meta name="description" content="Prepara el examen AWS Certified Solutions Architect – Associate (SAA-C03) jugando.">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Ruta SAA">
 <title>Ruta SAA-C03</title>
 <link rel="stylesheet" href="../node_modules/@fontsource-variable/outfit/index.css">
 <link rel="stylesheet" href="../node_modules/@fontsource-variable/nunito/index.css">
@@ -30,6 +39,7 @@
 <script src="data/whynot.js"></script>
 <script src="engine/kb.js"></script>
 <script src="engine/engine.js"></script>
+<script src="vendor/cloud.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

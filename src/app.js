@@ -12,6 +12,7 @@ const GEN_MAX = 800;
 let BANK = BASE.slice();
 const S = { qstate:{}, sessions:[], external:[], plan:{done:{}}, errlog:[], genq:[] };
 const P = { xp:0, days:{}, best:{time:0, surv:0, combo:0}, badges:{}, goal:30, sound:true, fams:{}, fr:{}, conf:{}, simUsed:[], path:{r:{}, skip:{}}, onb:null, gloss:true, glossSim:true, glSeen:{}, glTip:false };
+const P_INIT = JSON.stringify(P);
 let view = "ruta", Q = null, topic = null, fam = null, planDay = null, progTab = "resumen", pathOpen = null, onb = null;
 let repTab = "flash", glQ = "", glCat = "", glFocus = null;
 
@@ -32,7 +33,7 @@ const IC = {
   shuffle:'<path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/>', list:'<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
   spark:'<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5L18 18M6 18l2.5-2.5M15.5 8.5L18 6"/>', clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   lock:'<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
-  chest:'<path d="M4 10a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v9H4z"/><path d="M4 12h16M10.5 12v3h3v-3"/>', route:'<circle cx="6" cy="19" r="2.5"/><circle cx="18" cy="5" r="2.5"/><path d="M8.5 19H15a3.5 3.5 0 0 0 0-7H9a3.5 3.5 0 0 1 0-7h6.5"/>'
+  user:'<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>', chest:'<path d="M4 10a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v9H4z"/><path d="M4 12h16M10.5 12v3h3v-3"/>', route:'<circle cx="6" cy="19" r="2.5"/><circle cx="18" cy="5" r="2.5"/><path d="M8.5 19H15a3.5 3.5 0 0 0 0-7H9a3.5 3.5 0 0 1 0-7h6.5"/>'
 };
 const ic = (k, cls="i") => `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true">${IC[k]}</svg>`;
 const icFill = (k, cls="") => `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true" style="fill:currentColor;stroke:none">${IC[k]}</svg>`;
@@ -66,12 +67,89 @@ const LS = {
   list(c){ const out=[]; try { const pre=this.k(c+"/"); for (let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if (k && k.startsWith(pre)) out.push({...JSON.parse(localStorage.getItem(k)), id:k.slice(pre.length)}); } } catch(e){} return out; }
 };
 const D = window.desk || null;
-const Store = {
+const Base = {
   get: p => D ? D.get(p) : Promise.resolve(LS.get(p)),
   set: (p, d) => D ? D.set(p, d) : Promise.resolve(LS.set(p, d)),
   del: p => D ? D.del(p) : Promise.resolve(LS.del(p)),
   list: c => D ? D.list(c) : Promise.resolve(LS.list(c))
 };
+/* Con cuenta, el progreso de cada usuario vive en su propio espacio local ("u/<id>/…") y se sincroniza
+   con la nube; sin cuenta, en el espacio raíz de este equipo, como antes. */
+let NS = "";
+const Store = {
+  get: p => Base.get(NS + p),
+  set: (p, d) => { const r = Base.set(NS + p, d); Sync.touch(p); return r; },
+  del: p => { const r = Base.del(NS + p); Sync.touch(p); return r; },
+  list: c => Base.list(NS + c)
+};
+const COLLS = ["sessions", "external", "errlog", "gen"], SINGLE = ["progress/qstate", "progress/plan", "progress/profile"];
+async function localPaths(ns){
+  const out = [];
+  for (const p of SINGLE) if (await Base.get(ns + p) != null) out.push(p);
+  for (const c of COLLS) for (const x of await Base.list(ns + c)) out.push(c + "/" + x.id);
+  return out;
+}
+const Cloud = window.Cloud && window.Cloud.available ? window.Cloud : null;
+if (Cloud) Cloud.init();
+let me = null; // usuario con sesión iniciada
+const Sync = {
+  on: false, meta: null, busy: false, state: "off", err: "", saveT: null, flushT: null,
+  async begin(){ this.meta = { ts:{}, out:{}, last:0, ...(await Base.get(NS + "_sync") || {}) }; this.on = true; this.state = "ok"; },
+  stop(){ this.on = false; this.meta = null; this.state = "off"; clearTimeout(this.flushT); clearTimeout(this.saveT); },
+  saveMeta(){ clearTimeout(this.saveT); const ns = NS, m = this.meta; this.saveT = setTimeout(() => Base.set(ns + "_sync", m), 300); },
+  touch(p){ if (!this.on) return; this.meta.ts[p] = Date.now(); this.meta.out[p] = 1; this.saveMeta(); clearTimeout(this.flushT); this.flushT = setTimeout(() => this.flush(), 2500); },
+  pending(){ return this.on ? Object.keys(this.meta.out).length : 0; },
+  // sube los cambios pendientes; si no hay conexión quedan guardados para el próximo intento
+  async flush(){
+    if (!this.on || this.busy || !Cloud) return;
+    const paths = Object.keys(this.meta.out); if (!paths.length) return;
+    this.busy = true; this.state = "syncing"; renderAcct();
+    try {
+      for (let i = 0; i < paths.length; i += 6) await Promise.all(paths.slice(i, i + 6).map(async p => {
+        const d = await Base.get(NS + p);
+        await Cloud.put(p, d, this.meta.ts[p] || Date.now(), d == null);
+        delete this.meta.out[p];
+      }));
+      this.state = "ok"; this.err = ""; this.meta.lastPush = Date.now();
+    } catch(e){ this.state = navigator.onLine === false ? "offline" : "error"; this.err = Cloud.errMsg(e); }
+    this.busy = false; this.saveMeta(); renderAcct();
+  },
+  // baja la versión de la nube: gana el documento modificado más recientemente
+  async pull(){
+    if (!this.on || !Cloud) return 0;
+    let docs; try { docs = await Cloud.list(); } catch(e){ this.state = navigator.onLine === false ? "offline" : "error"; this.err = Cloud.errMsg(e); renderAcct(); return 0; }
+    let changed = 0; const inCloud = new Set();
+    for (const d of docs){
+      inCloud.add(d.path);
+      if (this.meta.out[d.path] && (this.meta.ts[d.path] || 0) >= d.updated) continue; // lo local es más nuevo y está por subir
+      if ((this.meta.ts[d.path] || 0) >= d.updated) continue;
+      if (d.deleted) await Base.del(NS + d.path); else await Base.set(NS + d.path, d.data);
+      this.meta.ts[d.path] = d.updated; delete this.meta.out[d.path]; changed++;
+    }
+    for (const p of await localPaths(NS)) if (!inCloud.has(p)){ this.meta.out[p] = 1; this.meta.ts[p] = this.meta.ts[p] || Date.now(); }
+    this.meta.lastPull = Date.now(); this.state = "ok"; this.saveMeta(); renderAcct();
+    this.flush();
+    return changed;
+  }
+};
+function resetState(){
+  S.qstate = {}; S.sessions = []; S.external = []; S.plan = { done:{} }; S.errlog = []; S.genq = [];
+  for (const k of Object.keys(P)) delete P[k];
+  Object.assign(P, JSON.parse(P_INIT));
+  BANK = BASE.slice(); deck = null; Q = null; pathOpen = null; topic = null; fam = null;
+}
+// cambia de usuario (o a «sin cuenta»): guarda lo pendiente, vacía el estado y carga el espacio del nuevo usuario
+async function switchUser(u){
+  flushAll(); if (Sync.on) await Sync.flush();
+  Sync.stop(); resetState(); me = u; NS = u ? "u/" + u.id + "/" : "";
+  if (u) await Sync.begin();
+  await load(); view = "ruta"; render(); focusCurrent(false); checkBadges();
+}
+async function pullAndReload(){
+  const changed = await Sync.pull();
+  if (changed && !Q){ flushAll(); resetState(); await load(); render(); focusCurrent(false); }
+  return changed;
+}
 const pend = {};
 function queue(path, get, delay=700){ const p = pend[path] || (pend[path] = {timer:null}); p.get = get; clearTimeout(p.timer); p.timer = setTimeout(() => { p.timer = null; Store.set(path, p.get()); }, delay); }
 function flushAll(){ for (const [path, p] of Object.entries(pend)) if (p.timer){ clearTimeout(p.timer); p.timer = null; Store.set(path, p.get()); } }
@@ -268,6 +346,7 @@ function confetti(){
 function toast(msg, o={}){
   const t = document.createElement("div"); t.className = "toast"; if (o.c) t.style.setProperty("--c", o.c);
   t.innerHTML = `${o.icon?`<div class="ti">${ic(o.icon)}</div>`:""}<div>${esc(msg)}${o.sub?`<small>${esc(o.sub)}</small>`:""}</div>`;
+  if (o.onClick){ t.classList.add("clickable"); t.onclick = () => { t.remove(); o.onClick(); }; }
   const host = $("#toasts"); host.appendChild(t); while (host.children.length > 3) host.firstChild.remove();
   setTimeout(() => t.remove(), o.ms || 3200);
 }
@@ -619,6 +698,7 @@ function renderTop(){
     <div class="stat fire ${today().n?'':'off'}" title="Racha de días practicando">${icFill("flame","i")}${st}</div>
     <div class="stat lvl" title="${esc(titleOf(L))} · ${P.xp} XP"><div class="ring" style="--p:${Math.round(into/need*100)}"><span>${L}</span></div><div class="xp"><span>${P.xp.toLocaleString("es-PE")} XP</span><small>${esc(titleOf(L))}</small></div></div>
     <div class="stat" title="Días para el examen">${ic("clock")}${days === 0 ? "¡Hoy!" : days + " d"}</div>
+    ${Cloud ? `<button id="acctbtn" class="acct" data-top="account">${me ? `<span class="ini">${esc((me.email || "?")[0].toUpperCase())}</span>` : `${ic("user")}<span>Entrar</span>`}</button>` : ""}
     <button class="iconbtn" data-top="sound" title="Sonido">${ic(P.sound?"sound":"mute")}</button>
     <button class="iconbtn" data-top="theme" title="Cambiar tema">${ic(light?"moon":"sun")}</button>
     <button class="iconbtn" data-top="help" title="Atajos (F1)">${ic("help")}</button>`;
@@ -642,7 +722,7 @@ function render(){
   renderTop();
   const fn = { ruta:vRuta, jugar:vJugar, mapa:vMapa, plan:vPlan, decisiones:vDecisiones, repaso:vRepaso, progreso:vProgreso, recursos:vRecursos }[view] || vRuta;
   $("#main").innerHTML = `<div class="wrap"><section class="view">${fn()}</section></div>`;
-  bind();
+  bind(); renderAcct();
 }
 
 /* Jugar */
@@ -982,7 +1062,7 @@ function vSims(){
 function vRecursos(){
   const link = (u, t) => `<a href="${esc(u)}" data-ext="${esc(u)}">${esc(t)}</a>`;
   const light = document.documentElement.dataset.theme === "light";
-  return `<h1>Recursos y ajustes</h1>
+  return `<h1>Recursos y ajustes</h1>${accountCard()}
   <div class="g2"><div class="card stack"><h3>Datos del examen</h3><ul style="margin:0;padding-left:1.1rem;display:grid;gap:6px">
     <li><b>65 preguntas</b> (50 puntúan y 15 no, sin identificarse), de opción múltiple o respuesta múltiple.</li>
     <li><b>130 minutos</b>. Escala de 100 a 1000; apruebas con <b>720</b>. No hay mínimo por dominio.</li>
@@ -1226,6 +1306,13 @@ function act(a, el){
     case "pathretry": { const id = Q.pathOut.id; Q = null; view = "ruta"; return startNode(id); }
     case "introgo": Q.intro = null; Q.t0 = Date.now(); render(); $("#mainscroll").scrollTo({top:0}); return;
     case "onbagain": return showOnb();
+    case "authopen": return showAuth("login");
+    case "syncnow": { el.disabled = true; flushAll(); return pullAndReload().then(() => { toast(syncLbl(), { icon:"redo", c:"var(--good)" }); if (view === "recursos" && !Q) render(); }); }
+    case "logout": return logout();
+    case "delacct": {
+      if (!el.dataset.armed){ el.dataset.armed = 1; el.textContent = "¿Seguro? Se borra tu progreso en la nube. Toca otra vez para confirmar"; return; }
+      return Cloud.deleteAccount().then(async () => { toast("Cuenta eliminada", { sub:"Tu progreso en la nube se borró.", icon:"check" }); await switchUser(null); }).catch(e => toast(Cloud.errMsg(e), { c:"var(--bad)", icon:"x" }));
+    }
     case "confirm": return confirmItem();
     case "next": return next();
     case "prev": if (Q.i > 0) setIdx(Q.i - 1); return;
@@ -1276,6 +1363,7 @@ function setTheme(t){
   render();
 }
 function topAct(k){
+  if (k === "account"){ if (me){ view = "recursos"; render(); $("#mainscroll").scrollTo({top:0}); } else showAuth("login"); return; }
   if (k === "theme") return setTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light");
   if (k === "sound"){ P.sound = !P.sound; saveP(); renderTop(); bind(); if (P.sound) sound("tick"); return; }
   if (k === "help") return showShortcuts();
@@ -1391,8 +1479,136 @@ function onbAct(a){
   const nx = currentNode(); pathOpen = nx ? nx.id : null; render(); focusCurrent(true);
 }
 
+/* ───────── cuenta: login, registro y sincronización ───────── */
+let auth = null; // { step, email, err, busy, info }
+const AUTH_SKIP = "saa-auth-skip";
+const skipAuth = () => { try { return localStorage.getItem(AUTH_SKIP) === "1"; } catch(e){ return false; } };
+function showAuth(step = "login"){ if (!Cloud || (Q && !Q.result)) return; onb = null; $("#onbhost").innerHTML = ""; auth = { step, email: (auth && auth.email) || "", err:"", info:"" }; renderAuth(); }
+function closeAuth(){ auth = null; $("#onbhost").innerHTML = ""; }
+const pwHint = "Mínimo 8 caracteres, con mayúscula, minúscula, número y símbolo.";
+function renderAuth(){
+  const host = $("#onbhost"); if (!auth){ host.innerHTML = ""; return; }
+  const a = auth, field = (id, type, label, extra = "") => `<label class="f">${label}<input id="${id}" type="${type}" ${extra}></label>`;
+  const T = {
+    login: ["Inicia sesión", "Tu progreso se guarda en la nube y lo ves igual en la PC, la web y el celular.",
+      `${field("au-email","email","Correo",`autocomplete="username" value="${esc(a.email)}"`)}${field("au-pw","password","Contraseña",'autocomplete="current-password"')}
+       <button class="btn primary big" data-auth="login" data-primary>Entrar</button>
+       <div class="row between"><button class="btn ghost" data-auth="go:forgot">Olvidé mi contraseña</button><button class="btn ghost" data-auth="go:signup">Crear una cuenta →</button></div>`],
+    signup: ["Crea tu cuenta", "Gratis. Solo necesitas un correo: te enviaremos un código para confirmarlo.",
+      `${field("au-email","email","Correo",`autocomplete="username" value="${esc(a.email)}"`)}${field("au-pw","password","Contraseña",'autocomplete="new-password"')}
+       <p class="note">${pwHint}</p>
+       <button class="btn primary big" data-auth="signup" data-primary>Crear cuenta</button>
+       <button class="btn ghost" data-auth="go:login" style="justify-self:start">← Ya tengo cuenta</button>`],
+    confirm: ["Revisa tu correo", `Te enviamos un código de 6 dígitos a <b>${esc(a.email)}</b>. Si no lo ves, revisa la carpeta de spam.`,
+      `${field("au-code","text","Código",'inputmode="numeric" autocomplete="one-time-code" maxlength="8"')}
+       <button class="btn primary big" data-auth="confirm" data-primary>Confirmar</button>
+       <div class="row between"><button class="btn ghost" data-auth="resend">Reenviar el código</button><button class="btn ghost" data-auth="go:login">Volver</button></div>`],
+    forgot: ["Recupera tu contraseña", "Te enviaremos un código a tu correo para crear una nueva.",
+      `${field("au-email","email","Correo",`autocomplete="username" value="${esc(a.email)}"`)}
+       <button class="btn primary big" data-auth="forgot" data-primary>Enviar código</button>
+       <button class="btn ghost" data-auth="go:login" style="justify-self:start">← Volver</button>`],
+    reset: ["Nueva contraseña", `Escribe el código que llegó a <b>${esc(a.email)}</b> y tu nueva contraseña.`,
+      `${field("au-code","text","Código",'inputmode="numeric" autocomplete="one-time-code" maxlength="8"')}${field("au-pw","password","Nueva contraseña",'autocomplete="new-password"')}
+       <p class="note">${pwHint}</p><button class="btn primary big" data-auth="reset" data-primary>Guardar y entrar</button>`],
+    migrate: ["¿Subimos tu progreso?", `En este equipo tienes progreso guardado sin cuenta (${a.info}). Puedes subirlo a tu cuenta para seguir donde ibas en cualquier dispositivo.`,
+      `<button class="btn primary big" data-auth="mig:yes" data-primary>${ic("check")} Sí, subirlo a mi cuenta</button>
+       <button class="btn" data-auth="mig:no">Empezar de cero en esta cuenta</button>
+       <p class="note">Si eliges empezar de cero, el progreso de este equipo no se borra: sigue disponible usando la app sin cuenta.</p>`]
+  }[a.step];
+  host.innerHTML = `<div class="onb" role="dialog" aria-modal="true" aria-label="${esc(T[0])}">
+    <div class="onbtop"><span style="width:36px"></span><div style="flex:1"></div>${a.step !== "migrate" ? `<button class="btn ghost" data-auth="skip">${me ? "Volver" : "Continuar sin cuenta"}</button>` : ""}</div>
+    <div class="onbbody"><div class="onbin authbox">
+      ${guide(esc(T[0]), `<p>${T[1]}</p>`)}
+      <form class="card stack" id="authform" novalidate>${T[2]}
+        ${a.err ? `<div class="autherr" role="alert">${ic("x")} ${esc(a.err)}</div>` : ""}${a.ok ? `<div class="authok">${ic("check")} ${esc(a.ok)}</div>` : ""}
+      </form>
+      ${a.step === "login" || a.step === "signup" ? `<p class="note" style="text-align:center">Sin cuenta también puedes usar la app: el progreso se guarda solo en este dispositivo.</p>` : ""}
+    </div></div></div>`;
+  $$("[data-auth]", host).forEach(el => el.onclick = e => { e.preventDefault(); authAct(el.dataset.auth); });
+  $("#authform").onsubmit = e => { e.preventDefault(); const b = $("[data-primary]", host); if (b && !b.disabled) b.click(); };
+  if (a.busy) $$("button", host).forEach(b => b.disabled = true);
+  const first = $("#authform input:not([value]), #authform input[value='']", host) || $("#authform input", host); if (first) first.focus();
+}
+async function authAct(k){
+  // los campos se leen antes de redibujar la pantalla (run() la vuelve a pintar con «Cargando»)
+  const a = auth, F = {}; for (const id of ["au-email","au-pw","au-code"]) F[id] = ($("#" + id) || {}).value || "";
+  const val = id => F[id];
+  if (k.startsWith("go:")){ a.email = val("au-email") || a.email; a.step = k.slice(3); a.err = a.ok = ""; return renderAuth(); }
+  if (k === "skip"){ try { localStorage.setItem(AUTH_SKIP, "1"); } catch(e){} closeAuth(); if (!me && !P.onb) showOnb(); return; }
+  const run = async fn => { a.busy = true; a.err = a.ok = ""; renderAuth(); try { await fn(); } catch(e){ a.err = Cloud.errMsg(e); } a.busy = false; if (auth) renderAuth(); };
+  if (k === "login") return run(async () => {
+    a.email = val("au-email").trim().toLowerCase(); const pw = val("au-pw");
+    if (!a.email || !pw) throw new Error("Escribe tu correo y tu contraseña.");
+    const step = await Cloud.signIn(a.email, pw);
+    if (step === "CONFIRM_SIGN_UP"){ a.step = "confirm"; a.ok = "Te enviamos un código nuevo."; return; }
+    await afterLogin();
+  });
+  if (k === "signup") return run(async () => {
+    a.email = val("au-email").trim().toLowerCase(); const pw = val("au-pw");
+    if (!/^\S+@\S+\.\S+$/.test(a.email)) throw new Error("Escribe un correo válido.");
+    a.pw = pw; const step = await Cloud.signUp(a.email, pw);
+    if (step === "DONE" || step === "COMPLETE_AUTO_SIGN_IN"){ await Cloud.signIn(a.email, pw); return afterLogin(); }
+    a.step = "confirm";
+  });
+  if (k === "confirm") return run(async () => {
+    const u = await Cloud.confirm(a.email, val("au-code"));
+    if (!u && a.pw) await Cloud.signIn(a.email, a.pw);
+    if (!Cloud.user()){ a.step = "login"; a.ok = "Cuenta confirmada. Ahora inicia sesión."; return; }
+    await afterLogin();
+  });
+  if (k === "resend") return run(async () => { await Cloud.resend(a.email); a.ok = "Listo: te enviamos otro código."; });
+  if (k === "forgot") return run(async () => { a.email = val("au-email").trim().toLowerCase(); await Cloud.forgot(a.email); a.step = "reset"; });
+  if (k === "reset") return run(async () => { const pw = val("au-pw"); await Cloud.confirmForgot(a.email, val("au-code"), pw); await Cloud.signIn(a.email, pw); await afterLogin(); });
+  if (k === "mig:yes" || k === "mig:no") return run(async () => {
+    if (k === "mig:yes"){ for (const p of await localPaths("")){ await Base.set(NS + p, await Base.get(p)); Sync.touch(p); } await Sync.flush(); }
+    a.migrated = true; await finishLogin();
+  });
+}
+// tras iniciar sesión: abre el espacio del usuario, baja su progreso y ofrece subir el de este equipo si la cuenta está vacía
+async function afterLogin(){
+  const u = Cloud.user(); if (!u) throw new Error("No se pudo iniciar sesión.");
+  try { localStorage.removeItem(AUTH_SKIP); } catch(e){}
+  flushAll(); Sync.stop(); resetState(); me = u; NS = "u/" + u.id + "/";
+  await Sync.begin(); await Sync.pull();
+  const mine = await localPaths(NS), anon = await localPaths("");
+  if (!mine.length && anon.length){
+    const ses = anon.filter(p => p.startsWith("sessions/")).length, pr = await Base.get("progress/profile");
+    auth.info = `${ses} ${ses === 1 ? "partida" : "partidas"}${pr && pr.xp ? ` y ${pr.xp.toLocaleString("es-PE")} XP` : ""}`;
+    auth.step = "migrate"; return;
+  }
+  await finishLogin();
+}
+async function finishLogin(){
+  closeAuth(); await load(); view = "ruta"; render(); focusCurrent(false); checkBadges();
+  toast("¡Hola! Sesión iniciada", { sub: me.email + " · tu progreso se sincroniza solo.", icon:"check", c:"var(--good)" });
+  if (!P.onb) showOnb();
+}
+async function logout(){
+  flushAll(); await Sync.flush();
+  if (Sync.pending() && !confirm("Hay cambios que todavía no se subieron (sin conexión). Si cierras sesión ahora, se subirán la próxima vez que entres en este equipo. ¿Cerrar sesión?")) return;
+  try { await Cloud.signOut(); } catch(e){}
+  await switchUser(null); showAuth("login");
+}
+const syncLbl = () => !me ? "" : Sync.state === "syncing" ? "Sincronizando…" : Sync.state === "offline" ? `Sin conexión · ${Sync.pending()} cambios por subir` : Sync.state === "error" ? "Error al sincronizar" : Sync.pending() ? `${Sync.pending()} cambios por subir` : "Todo sincronizado";
+function renderAcct(){
+  const b = $("#acctbtn"); if (!b) return;
+  b.className = "acct " + (me ? "s-" + Sync.state : "");
+  b.title = me ? `${me.email} · ${syncLbl()}` : "Inicia sesión para guardar tu progreso en la nube";
+  const s = $("#syncstate"); if (s) s.textContent = syncLbl() + (Sync.err && Sync.state === "error" ? ` (${Sync.err})` : "");
+}
+function accountCard(){
+  if (!Cloud) return "";
+  if (!me) return `<div class="card stack"><h3>Cuenta</h3><p class="note">Estás usando la app sin cuenta: tu progreso vive solo en este dispositivo. Con una cuenta gratuita se guarda en la nube y lo continúas en la PC, la web o el celular.</p>
+    <div class="row"><button class="btn primary" data-act="authopen">${ic("check")} Iniciar sesión o crear cuenta</button></div></div>`;
+  const last = Sync.meta && (Sync.meta.lastPush || Sync.meta.lastPull);
+  return `<div class="card stack"><div class="row between"><h3>Cuenta</h3><span class="pill ${Sync.state === "ok" && !Sync.pending() ? "good" : Sync.state === "error" ? "bad" : "gold"}" id="syncstate">${esc(syncLbl())}</span></div>
+    <div class="row"><div class="avatar">${esc((me.email || "?")[0].toUpperCase())}</div><div><b>${esc(me.email)}</b><div class="muted" style="font-size:.85rem">${last ? "Última sincronización: " + new Date(last).toLocaleString("es-PE", { dateStyle:"short", timeStyle:"short" }) : "Aún no se sincroniza"}</div></div></div>
+    <div class="row"><button class="btn" data-act="syncnow">${ic("redo")} Sincronizar ahora</button><button class="btn" data-act="logout">Cerrar sesión</button><button class="btn ghost small" data-act="delacct" style="color:var(--bad)">Eliminar mi cuenta…</button></div></div>`;
+}
+
 /* ───────── teclado ───────── */
 document.addEventListener("keydown", e => {
+  if (auth) return;
   if (onb){ if (e.key === "Enter" && e.target.tagName !== "BUTTON"){ const b = $("#onbhost [data-primary]"); if (b && !b.disabled){ e.preventDefault(); b.click(); } } return; }
   if (e.key === "Escape" && !$("#gltip").hidden){ hideTip(); return; }
   if (e.key === "Escape"){ if (!$("#modal").hidden){ $("#modal").hidden = true; return; } if (Q && Q.drawer){ Q.drawer = null; render(); return; } if (!Q && pathOpen){ pathOpen = null; render(); return; } }
@@ -1424,5 +1640,26 @@ const h0 = (location.hash||"").slice(1);
 if (VIEWS.some(v => v[0] === h0)) view = h0;
 document.addEventListener("click", e => { if (pathOpen && !Q && !onb && view === "ruta" && document.body.contains(e.target) && !e.target.closest(".pop,.pnode")){ pathOpen = null; render(); } });
 render();
-load().then(() => { render(); focusCurrent(false); checkBadges(); if (!P.onb) showOnb(); }).catch(err => { console.error(err); toast("No se pudo cargar tu progreso.", { c:"var(--bad)", icon:"x" }); render(); });
+// versión web: modo sin conexión y aviso cuando hay una versión nueva publicada
+if ("serviceWorker" in navigator && !D && !window.Capacitor && /^https:|^http:\/\/(localhost|127\.0\.0\.1)/.test(location.href)){
+  navigator.serviceWorker.register("sw.js").then(reg => {
+    const offer = w => toast("Hay una versión nueva de la app", { sub:"Toca aquí para actualizar.", icon:"redo", c:"var(--good)", ms:15000, onClick: () => w.postMessage("skipWaiting") });
+    if (reg.waiting && navigator.serviceWorker.controller) offer(reg.waiting);
+    reg.addEventListener("updatefound", () => { const w = reg.installing; w && w.addEventListener("statechange", () => { if (w.state === "installed" && navigator.serviceWorker.controller) offer(w); }); });
+    setInterval(() => reg.update().catch(() => {}), 30 * 60000);
+  }).catch(() => {});
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => { if (!reloaded){ reloaded = true; flushAll(); location.reload(); } });
+}
+async function boot(){
+  if (Cloud){ const u = await Cloud.current().catch(() => null); if (u){ me = u; NS = "u/" + u.id + "/"; await Sync.begin(); } }
+  await load(); render(); focusCurrent(false); checkBadges();
+  if (me) pullAndReload();
+  else if (Cloud && !skipAuth()) return showAuth("login");
+  if (!P.onb) showOnb();
+}
+// con sesión: sube lo pendiente al volver la conexión y baja cambios de otros dispositivos al volver a la app
+window.addEventListener("online", () => Sync.flush());
+document.addEventListener("visibilitychange", () => { if (!document.hidden && me && Sync.meta && Date.now() - (Sync.meta.lastPull || 0) > 5 * 60000) pullAndReload(); });
+boot().catch(err => { console.error(err); toast("No se pudo cargar tu progreso.", { c:"var(--bad)", icon:"x" }); render(); });
 })();
