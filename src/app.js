@@ -1062,7 +1062,7 @@ function vSims(){
 function vRecursos(){
   const link = (u, t) => `<a href="${esc(u)}" data-ext="${esc(u)}">${esc(t)}</a>`;
   const light = document.documentElement.dataset.theme === "light";
-  return `<h1>Recursos y ajustes</h1>${accountCard()}
+  return `<h1>Recursos y ajustes</h1>${accountCard()}${downloadsCard()}
   <div class="g2"><div class="card stack"><h3>Datos del examen</h3><ul style="margin:0;padding-left:1.1rem;display:grid;gap:6px">
     <li><b>65 preguntas</b> (50 puntúan y 15 no, sin identificarse), de opción múltiple o respuesta múltiple.</li>
     <li><b>130 minutos</b>. Escala de 100 a 1000; apruebas con <b>720</b>. No hay mínimo por dominio.</li>
@@ -1278,6 +1278,7 @@ function bind(){
     S.errlog.push(rec); render(); toast("Regla agregada a la bitácora", { c:"var(--good)", icon:"check" }); await Store.set("errlog/"+rec.id, rec); };
   $$("[data-act]").forEach(el => { el.onclick = ev => act(el.dataset.act, el, ev); if (el.dataset.act==="flip") el.onkeydown = e => { if (e.key==="Enter"){ e.preventDefault(); act("flip"); } }; });
   const dp = $("#datapath"); if (dp && D) D.dataPath().then(p => dp.textContent = p);
+  const av = $("#appver"); if (av) appVersion().then(v => { if (v) av.textContent = "Versión " + v; });
 }
 function startMode(k){
   const seed = () => { const used = new Set(), qs = []; for (let i=0;i<3;i++){ const q = nextEndless(used); if (q){ qs.push(q); used.add(q.id); } } return qs; };
@@ -1307,6 +1308,10 @@ function act(a, el){
     case "introgo": Q.intro = null; Q.t0 = Date.now(); render(); $("#mainscroll").scrollTo({top:0}); return;
     case "onbagain": return showOnb();
     case "authopen": return showAuth("login");
+    case "checkupd": return checkUpdates(true);
+    case "iosinfo": { const md = $("#modal"); md.innerHTML = `<div class="card stack" role="dialog" aria-label="Instalar en iPhone"><div class="row between"><h3>Instalar en iPhone o iPad</h3><button class="iconbtn" id="mdclose">${ic("x")}</button></div>
+      <ol style="margin:0;padding-left:1.2rem;display:grid;gap:8px"><li>Abre <b>${esc(location.protocol.startsWith("http") ? location.origin : "la web de la app")}</b> en <b>Safari</b>.</li><li>Toca el botón <b>Compartir</b> (el cuadrado con la flecha hacia arriba).</li><li>Elige <b>Agregar a pantalla de inicio</b> y confirma.</li></ol>
+      <p class="note">Se abre como una app, con su ícono, funciona sin conexión y se actualiza sola. Apple no permite instalar apps fuera de la App Store, por eso en iPhone se usa así.</p></div>`; md.hidden = false; $("#mdclose").onclick = () => md.hidden = true; md.onclick = e => { if (e.target === md) md.hidden = true; }; return; }
     case "syncnow": { el.disabled = true; flushAll(); return pullAndReload().then(() => { toast(syncLbl(), { icon:"redo", c:"var(--good)" }); if (view === "recursos" && !Q) render(); }); }
     case "logout": return logout();
     case "delacct": {
@@ -1635,7 +1640,62 @@ document.addEventListener("keydown", e => {
 });
 
 /* ───────── arranque ───────── */
-if (D) D.onMenu(a => { if (a.startsWith("go:")) go(a.slice(3)); else if (a === "theme") topAct("theme"); else if (a === "shortcuts") showShortcuts(); else if (a === "exported") toast("Progreso exportado", { c:"var(--good)", icon:"check" }); });
+/* ───────── versiones nuevas ───────── */
+const REPO = "Anedre/ruta-saa-c03", RELEASES = `https://github.com/${REPO}/releases/latest`;
+const IS_ANDROID = !!(window.Capacitor && window.Capacitor.getPlatform && window.Capacitor.getPlatform() === "android");
+const newer = (a, b) => { const x = String(a).replace(/^v/, "").split(".").map(Number), y = String(b).replace(/^v/, "").split(".").map(Number); for (let i = 0; i < 3; i++){ if ((x[i]||0) !== (y[i]||0)) return (x[i]||0) > (y[i]||0); } return false; };
+function openUrl(u){
+  if (D) return D.openExternal(u);
+  const B = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Browser;
+  if (B) return B.open({ url: u });
+  window.open(u, "_blank", "noopener");
+}
+// la versión portable de Windows y el APK de Android no se actualizan solos: avisan y llevan a la descarga
+async function checkRelease(current, manual){
+  try {
+    const r = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, { headers:{ Accept:"application/vnd.github+json" } });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const rel = await r.json(), v = rel.tag_name;
+    if (!newer(v, current)){ if (manual) toast("Ya tienes la versión más reciente", { sub:"Versión " + current, icon:"check", c:"var(--good)" }); return; }
+    const want = IS_ANDROID ? /\.apk$/i : /portable\.exe$/i, asset = (rel.assets || []).find(x => want.test(x.name));
+    toast(`Hay una versión nueva: ${v}`, { sub: IS_ANDROID ? "Toca para descargar el APK e instalarlo." : "Toca para descargarla.", icon:"redo", c:"var(--good)", ms:20000, onClick: () => openUrl(asset ? asset.browser_download_url : rel.html_url) });
+  } catch(e){ if (manual) toast("No se pudo buscar actualizaciones", { sub:"Revisa tu conexión.", icon:"x", c:"var(--bad)" }); }
+}
+let APP_VER = null;
+async function appVersion(){
+  if (APP_VER) return APP_VER;
+  if (D && D.appInfo){ const i = await D.appInfo(); APP_VER = i.version; return APP_VER; }
+  try { APP_VER = (await (await fetch("version.json", { cache:"no-store" })).json()).version; } catch(e){}
+  return APP_VER;
+}
+async function checkUpdates(manual){
+  const v = await appVersion();
+  if (D && D.checkUpdate){
+    const info = await D.appInfo();
+    if (info.portable) return checkRelease(v, manual);
+    if (!info.packaged){ if (manual) toast("En modo desarrollo no se buscan actualizaciones", { icon:"help" }); return; }
+    const r = await D.checkUpdate();
+    if (manual) toast(r.ok ? (r.version && newer(r.version, v) ? `Descargando la versión ${r.version}…` : "Ya tienes la versión más reciente") : "No se pudo buscar actualizaciones", { sub: r.ok ? "Versión actual " + v : r.reason, icon: r.ok ? "check" : "x" });
+    return;
+  }
+  if (IS_ANDROID) return checkRelease(v, manual);
+  if (manual) location.reload(); // web: el service worker trae la versión nueva
+}
+function downloadsCard(){
+  return `<div class="card stack"><h3>Descarga la app</h3><p class="note">Tu cuenta y tu progreso son los mismos en todas las versiones.</p>
+    <div class="dl">
+      <button class="btn" data-ext="${RELEASES}">${ic("grid")} Windows: instalador (se actualiza solo)</button>
+      <button class="btn" data-ext="https://github.com/${REPO}/releases/latest/download/Ruta-SAA-C03.apk">${ic("play")} Android: APK</button>
+      <button class="btn" data-act="iosinfo">${ic("star")} iPhone y iPad: desde Safari</button>
+    </div>
+    <div class="row"><span class="muted" id="appver"></span><button class="btn small" data-act="checkupd">${ic("redo")} Buscar actualizaciones</button></div></div>`;
+}
+
+if (D) D.onMenu(a => {
+  if (a.startsWith("update:available:")) return toast(`Descargando la versión ${a.split(":")[2]}…`, { sub:"Se instalará cuando cierres la app.", icon:"redo" });
+  if (a.startsWith("update:ready:")) return toast(`Versión ${a.split(":")[2]} lista`, { sub:"Toca para reiniciar e instalarla ahora (o se instalará al cerrar).", icon:"check", c:"var(--good)", ms:60000, onClick: () => { flushAll(); setTimeout(() => D.installUpdate(), 400); } });
+  if (a === "update:check") return checkUpdates(true);
+  if (a.startsWith("go:")) go(a.slice(3)); else if (a === "theme") topAct("theme"); else if (a === "shortcuts") showShortcuts(); else if (a === "exported") toast("Progreso exportado", { c:"var(--good)", icon:"check" }); });
 const h0 = (location.hash||"").slice(1);
 if (VIEWS.some(v => v[0] === h0)) view = h0;
 document.addEventListener("click", e => { if (pathOpen && !Q && !onb && view === "ruta" && document.body.contains(e.target) && !e.target.closest(".pop,.pnode")){ pathOpen = null; render(); } });
@@ -1652,6 +1712,9 @@ if ("serviceWorker" in navigator && !D && !window.Capacitor && /^https:|^http:\/
   navigator.serviceWorker.addEventListener("controllerchange", () => { if (!reloaded){ reloaded = true; flushAll(); location.reload(); } });
 }
 async function boot(){
+  appVersion().then(v => { const el = $("#appver"); if (el && v) el.textContent = "Versión " + v; });
+  if (IS_ANDROID) setTimeout(() => checkUpdates(false), 4000);
+  else if (D && D.appInfo) D.appInfo().then(i => { if (i.portable) setTimeout(() => checkUpdates(false), 5000); });
   if (Cloud){ const u = await Cloud.current().catch(() => null); if (u){ me = u; NS = "u/" + u.id + "/"; await Sync.begin(); } }
   await load(); render(); focusCurrent(false); checkBadges();
   if (me) pullAndReload();

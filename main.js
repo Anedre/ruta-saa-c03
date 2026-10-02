@@ -39,6 +39,32 @@ ipcMain.handle("store:path", () => DATA_FILE());
 ipcMain.handle("store:export", () => exportData());
 ipcMain.handle("store:import", () => importData());
 ipcMain.handle("open-external", (_e, url) => { if (/^https:\/\//.test(url)) shell.openExternal(url); });
+// la versión portable no puede actualizarse sola: la interfaz solo avisa que hay una nueva
+const isPortable = !!process.env.PORTABLE_EXECUTABLE_DIR;
+ipcMain.handle("app:info", () => ({ version: app.getVersion(), portable: isPortable, packaged: app.isPackaged }));
+
+/* Actualizaciones automáticas (instalador NSIS): busca en GitHub Releases al abrir y cada 6 horas,
+   descarga en segundo plano y se instala al cerrar la app (o al instante si el usuario lo pide). */
+let updater = null;
+function setupUpdates() {
+  if (!app.isPackaged || isPortable || process.env.SAA_SMOKE) return;
+  try { updater = require("electron-updater").autoUpdater; } catch (_) { return; }
+  updater.autoDownload = true;
+  updater.autoInstallOnAppQuit = true;
+  const send = a => win && win.webContents.send("menu", a);
+  updater.on("update-available", i => send("update:available:" + i.version));
+  updater.on("update-downloaded", i => send("update:ready:" + i.version));
+  updater.on("error", e => console.error("Actualizaciones:", e && e.message));
+  const check = () => updater.checkForUpdates().catch(() => {});
+  setTimeout(check, 5000);
+  setInterval(check, 6 * 3600 * 1000);
+}
+ipcMain.handle("update:install", () => { if (updater) updater.quitAndInstall(false, true); });
+ipcMain.handle("update:check", async () => {
+  if (!updater) return { ok: false, reason: isPortable ? "portable" : "dev" };
+  try { const r = await updater.checkForUpdates(); return { ok: true, version: r && r.updateInfo && r.updateInfo.version, current: app.getVersion() }; }
+  catch (e) { return { ok: false, reason: e.message }; }
+});
 
 async function exportData() {
   const stamp = new Date().toISOString().slice(0, 10);
@@ -181,10 +207,11 @@ function buildMenu() {
       { type: "separator" }, { label: "Pantalla completa", role: "togglefullscreen" }, { label: "Recargar", role: "reload" }, { label: "Herramientas de desarrollo", role: "toggleDevTools" }] },
     { label: "Ayuda", submenu: [
       { label: "Atajos de teclado", accelerator: "F1", click: send("shortcuts") },
+      { label: "Buscar actualizaciones", click: send("update:check") },
       { label: "Acerca de Ruta SAA-C03", click: () => dialog.showMessageBox(win, { title: "Ruta SAA-C03", message: "Ruta SAA-C03 " + app.getVersion(), detail: "Consola de preparación para AWS Certified Solutions Architect - Associate.\nTu progreso se guarda en:\n" + DATA_FILE() }) }] }
   ]));
 }
 
-app.whenReady().then(() => { loadData(); buildMenu(); createWindow(); });
+app.whenReady().then(() => { loadData(); buildMenu(); createWindow(); setupUpdates(); });
 app.on("before-quit", () => { if (saveTimer) writeNow(); });
 app.on("window-all-closed", () => { if (saveTimer) writeNow(); app.quit(); });

@@ -21,3 +21,4 @@ amplify_outputs.json
 Thumbs.db
 src/vendor/
 www-mock/
+release-test/

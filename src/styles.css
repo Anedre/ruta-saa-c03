@@ -545,3 +545,6 @@ th{font:700 .72rem var(--display);text-transform:uppercase;letter-spacing:.06em;
 .autherr svg,.authok svg{width:18px;height:18px;flex:none;margin-top:2px}
 input[type=email],input[type=password]{background:var(--sunken);border:2px solid var(--line);border-radius:10px;padding:10px 12px;width:100%;min-width:0;color:var(--ink);font-size:1rem}
 @media (max-width:760px){ .acct span:not(.ini){display:none} .acct{padding:0 9px} }
+
+.dl{display:grid;gap:10px}
+.dl .btn{justify-content:flex-start}

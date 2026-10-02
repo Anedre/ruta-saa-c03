@@ -10,5 +10,8 @@ contextBridge.exposeInMainWorld("desk", {
   exportData: () => ipcRenderer.invoke("store:export"),
   importData: () => ipcRenderer.invoke("store:import"),
   openExternal: url => ipcRenderer.invoke("open-external", url),
+  appInfo: () => ipcRenderer.invoke("app:info"),
+  checkUpdate: () => ipcRenderer.invoke("update:check"),
+  installUpdate: () => ipcRenderer.invoke("update:install"),
   onMenu: cb => ipcRenderer.on("menu", (_e, a) => cb(a))
 });
